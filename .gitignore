@@ -1,0 +1,15 @@
+# Python cache
+__pycache__/
+*.pyc
+scripts/__pycache__/
+
+# Runtime screenshots / debug artifacts
+*.png
+!1.png
+!2.png
+!3.png
+!4.png
+
+# Local debug helpers
+scripts/debug_flow.py
+scripts/inspect_login_state.py

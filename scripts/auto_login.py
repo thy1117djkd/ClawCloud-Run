@@ -186,6 +186,30 @@ class AutoLogin:
         except: pass
         return None
 
+    def is_logged_into_clawcloud(self, page):
+        try:
+            url = page.url or ""
+            if 'claw.cloud' not in url:
+                return False
+            if '/signin' in url or '/login' in url:
+                return False
+            # 页面上如果还能明显看到 GitHub 登录入口，视为未登录
+            login_selectors = [
+                'button:has-text("GitHub")',
+                '[data-provider="github"]',
+                'text=Sign in to ClawCloud',
+                'text=Continue with GitHub',
+            ]
+            for sel in login_selectors:
+                try:
+                    if page.locator(sel).first.is_visible(timeout=1000):
+                        return False
+                except:
+                    pass
+            return True
+        except:
+            return False
+
     def save_cookie(self, value):
         if not value: return
         self.log(f"新 Cookie: {value[:15]}...", "SUCCESS")
@@ -215,12 +239,17 @@ class AutoLogin:
             f"{self.get_base_url()}/console",
             f"{self.get_base_url()}/apps",
         ]
+        success_hits = 0
         for url in targets:
             try:
                 page.goto(url, timeout=45000, wait_until='domcontentloaded')
                 time.sleep(random.uniform(2, 4))
                 self.detect_region(page.url)
                 self.shot(page, f"keepalive_{re.sub(r'[^a-zA-Z0-9]+', '_', url)[:40]}")
+                if self.is_logged_into_clawcloud(page):
+                    success_hits += 1
+                else:
+                    self.log(f"保活访问未进入控制台: {url} -> {page.url}", "WARN")
             except Exception as e:
                 self.log(f"保活访问失败: {url} -> {e}", "WARN")
         try:
@@ -228,6 +257,7 @@ class AutoLogin:
             time.sleep(2)
         except:
             pass
+        return success_hits > 0 and self.is_logged_into_clawcloud(page)
 
     def wait_device(self, page):
         self.log(f"等待设备验证 ({DEVICE_VERIFY_WAIT}s)...", "WARN")
@@ -335,6 +365,27 @@ class AutoLogin:
             # 添加 stealth 脚本注入 (绕过简单检测)
             page.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                Object.defineProperty(navigator, 'language', {get: () => 'en-US'});
+                Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+                Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+                Object.defineProperty(navigator, 'plugins', {
+                  get: () => [
+                    {name: 'Chrome PDF Plugin'},
+                    {name: 'Chrome PDF Viewer'},
+                    {name: 'Native Client'}
+                  ]
+                });
+                window.chrome = window.chrome || { runtime: {} };
+                const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+                if (originalQuery) {
+                  window.navigator.permissions.query = (parameters) => (
+                    parameters && parameters.name === 'notifications'
+                      ? Promise.resolve({ state: Notification.permission })
+                      : originalQuery(parameters)
+                  );
+                }
             """)
             
             try:
@@ -350,10 +401,13 @@ class AutoLogin:
                 page.goto(SIGNIN_URL, timeout=60000)
                 time.sleep(random.uniform(2, 4)) # 随机等待
                 
-                if 'signin' not in page.url and 'claw.cloud' in page.url:
-                    self.log("Cookie 有效，已登录", "SUCCESS")
+                if self.is_logged_into_clawcloud(page):
+                    self.log("Cookie 有效，已进入控制台", "SUCCESS")
                     self.detect_region(page.url)
-                    self.keepalive(page)
+                    if not self.keepalive(page):
+                        self.shot(page, "cookie_keepalive_failed")
+                        self.notify(False, "Cookie 存在，但未真正进入 ClawCloud 控制台")
+                        return
                     new = self.get_session(context)
                     if new: self.save_cookie(new)
                     self.notify(True)
@@ -384,27 +438,30 @@ class AutoLogin:
                 self.log(f"步骤4: 等待跳转 ({REDIRECT_WAIT}s)...", "STEP")
                 redirected = False
                 for _ in range(max(1, REDIRECT_WAIT // 2)):
-                    if 'claw.cloud' in page.url and 'signin' not in page.url:
+                    if self.is_logged_into_clawcloud(page):
                         redirected = True
                         break
                     # 如果还卡在 GitHub，尝试点授权
                     if 'oauth' in page.url:
                         self.click(page, ['button[name="authorize"]'])
                     time.sleep(2)
-                
+
                 if not redirected:
-                    self.log("重定向超时", "ERROR")
+                    self.log(f"未真正进入控制台，当前页面: {page.url}", "ERROR")
                     self.shot(page, "重定向失败")
-                    self.notify(False, "重定向超时")
+                    self.notify(False, f"未真正进入 ClawCloud 控制台，当前页面: {page.url}")
                     return
-                
+
                 self.detect_region(page.url)
-                self.keepalive(page)
-                
+                if not self.keepalive(page):
+                    self.shot(page, "keepalive_failed")
+                    self.notify(False, f"已跳转到 ClawCloud 域名，但仍未进入控制台。当前页面: {page.url}")
+                    return
+
                 # 更新 Cookie
                 new = self.get_session(context)
                 if new: self.save_cookie(new)
-                
+
                 self.notify(True)
                 print("✅ 成功！")
                 
