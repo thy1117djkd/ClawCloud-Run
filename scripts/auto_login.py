@@ -20,7 +20,8 @@ from playwright.sync_api import sync_playwright
 LOGIN_ENTRY_URL = "https://console.run.claw.cloud"
 SIGNIN_URL = f"{LOGIN_ENTRY_URL}/signin"
 DEVICE_VERIFY_WAIT = 30
-TWO_FACTOR_WAIT = int(os.environ.get("TWO_FACTOR_WAIT", "120"))
+TWO_FACTOR_WAIT = int(os.environ.get("TWO_FACTOR_WAIT", "60"))
+REDIRECT_WAIT = int(os.environ.get("REDIRECT_WAIT", "60"))
 
 class Telegram:
     """Telegram 通知"""
@@ -380,9 +381,9 @@ class AutoLogin:
                     time.sleep(3)
 
                 # 等待跳转
-                self.log("步骤4: 等待跳转 (120s)...", "STEP")
+                self.log(f"步骤4: 等待跳转 ({REDIRECT_WAIT}s)...", "STEP")
                 redirected = False
-                for _ in range(60): # 60 * 2s = 120s
+                for _ in range(max(1, REDIRECT_WAIT // 2)):
                     if 'claw.cloud' in page.url and 'signin' not in page.url:
                         redirected = True
                         break
