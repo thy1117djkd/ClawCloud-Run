@@ -193,6 +193,41 @@ class AutoLogin:
         else:
             self.tg.send(f"🔑 <b>新 Cookie</b>\n<code>{value}</code>")
 
+    def notify(self, success, message=""):
+        status = "✅ 成功" if success else "❌ 失败"
+        summary = "\n".join(self.logs[-20:]) if self.logs else "(无日志)"
+        text = f"{status}\n"
+        if message:
+            text += f"{message}\n"
+        text += f"\n最近日志：\n<code>{summary}</code>"
+        self.tg.send(text)
+        if self.shots:
+            try:
+                self.tg.photo(self.shots[-1], caption=(message or status)[:1024])
+            except:
+                pass
+
+    def keepalive(self, page):
+        self.log("执行保活访问...", "STEP")
+        targets = [
+            self.get_base_url(),
+            f"{self.get_base_url()}/console",
+            f"{self.get_base_url()}/apps",
+        ]
+        for url in targets:
+            try:
+                page.goto(url, timeout=45000, wait_until='domcontentloaded')
+                time.sleep(random.uniform(2, 4))
+                self.detect_region(page.url)
+                self.shot(page, f"keepalive_{re.sub(r'[^a-zA-Z0-9]+', '_', url)[:40]}")
+            except Exception as e:
+                self.log(f"保活访问失败: {url} -> {e}", "WARN")
+        try:
+            page.reload(timeout=30000)
+            time.sleep(2)
+        except:
+            pass
+
     def wait_device(self, page):
         self.log(f"等待设备验证 ({DEVICE_VERIFY_WAIT}s)...", "WARN")
         self.shot(page, "设备验证")
